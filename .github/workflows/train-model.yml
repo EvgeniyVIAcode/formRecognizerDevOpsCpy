@@ -1,0 +1,20 @@
+name: Train Model
+
+on:
+  workflow_dispatch:
+
+jobs:
+  train:
+    name: Train the new model
+    environment:
+      name: DEV
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run Azure PowerShell script validate
+        run: |
+          $secureString = ConvertTo-SecureString ${{ secrets.FUNCTION_TRAIN_MODEL_ENDPOINT }} -asplaintext -force
+          ./scripts/trainModel.ps1 -functionEndpoint $secureString
+        shell: pwsh

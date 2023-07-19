@@ -1,0 +1,27 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "devStorageName": {
+            "value": "__devStorageName__"
+        },
+        "devFormRecognizerName": {
+            "value": "__devFormRecognizerName__"
+        },
+        "qaFormRecognizerName": {
+            "value": "__qaFormRecognizerName__"
+        },
+        "prodFormRecognizerName": {
+            "value": "__prodFormRecognizerName__"
+        },
+        "devResourceGroupName": {
+            "value": "__devResourceGroupName__"
+        },
+        "qaResourceGroupName": {
+            "value": "__qaResourceGroupName__"
+        },
+        "prodResourceGroupName": {
+            "value": "__prodResourceGroupName__"
+        }
+    }
+}

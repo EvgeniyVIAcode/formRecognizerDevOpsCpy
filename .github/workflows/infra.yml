@@ -1,0 +1,183 @@
+
+#
+# Notice: Any links, references, or attachments that contain sample scripts, code, or commands comes with the following notification.
+#
+# This Sample Code is provided for the purpose of illustration only and is not intended to be used in a production environment.
+# THIS SAMPLE CODE AND ANY RELATED INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR PURPOSE.
+#
+# We grant You a nonexclusive, royalty-free right to use and modify the Sample Code and to reproduce and distribute the object code form of the Sample Code,
+# provided that You agree:
+#
+# (i) to not use Our name, logo, or trademarks to market Your software product in which the Sample Code is embedded;
+# (ii) to include a valid copyright notice on Your software product in which the Sample Code is embedded; and
+# (iii) to indemnify, hold harmless, and defend Us and Our suppliers from and against any claims or lawsuits,
+# including attorneys’ fees, that arise or result from the use or distribution of the Sample Code.
+#
+# Please note: None of the conditions outlined in the disclaimer above will superseded the terms and conditions contained within the Premier Customer Services Description.
+#
+# DEMO POC - "AS IS"
+
+name: Create Azure Resources
+
+on:  
+  workflow_dispatch:
+
+env:
+  LOCATION: 'eastus'
+
+jobs:
+  create-dev-environment:  
+    uses: hugogirard/formRecognizerDevOps/.github/workflows/create-resources.yml@main
+    with:
+      resourceGroupName: 'rg-form-recognizer-devops-dev'
+      location: 'eastus'
+      environmentName: 'dev'      
+    secrets:
+      azure_credentials: ${{ secrets.AZURE_CREDENTIALS  }}
+      subscriptionId: ${{ secrets.SUBSCRIPTION_ID }}
+
+  create-qa-environment:
+    uses: hugogirard/formRecognizerDevOps/.github/workflows/create-resources.yml@main
+    with:
+      resourceGroupName: 'rg-form-recognizer-devops-qa'
+      location: 'eastus'     
+      environmentName: 'qa'      
+    secrets:
+      azure_credentials: ${{ secrets.AZURE_CREDENTIALS  }}
+      subscriptionId: ${{ secrets.SUBSCRIPTION_ID }}      
+
+  create-prod-environment:
+    uses: hugogirard/formRecognizerDevOps/.github/workflows/create-resources.yml@main
+    with:
+      resourceGroupName: 'rg-form-recognizer-devops-prod'
+      location: 'eastus'   
+      environmentName: 'prod'      
+    secrets:
+      azure_credentials: ${{ secrets.AZURE_CREDENTIALS  }}
+      subscriptionId: ${{ secrets.SUBSCRIPTION_ID }}         
+  
+  create-deploy-azure-function:
+    needs: [create-dev-environment, create-qa-environment, create-prod-environment ]
+    runs-on: ubuntu-latest
+
+    outputs:
+      storageName: ${{ steps.armDeployment.outputs.storageName }}
+      appInsightName: ${{ steps.armDeployment.outputs.appInsightName }}
+      functionHostname: ${{ steps.armDeployment.outputs.functionHostname }}
+
+    env:
+      RG_NAME: 'rg-form-recognizer-devops-utility'           
+      AZURE_FUNCTIONAPP_PACKAGE_PATH: 'src/function'    
+      DOTNET_VERSION: '6.0.x'              
+
+    steps:    
+      - uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: Azure/login@v1
+        with:
+          creds: ${{ secrets.azure_credentials }}  
+
+      - name: Create Resource Group
+        run: |
+          az group create -n ${{ env.RG_NAME }} -l ${{ env.LOCATION }}
+  
+      - name: Replace tokens
+        uses: cschleiden/replace-tokens@v1.0
+        with:        
+          tokenPrefix: __        
+          tokenSuffix: __        
+          files: '["bicep/utility.parameters.json"]'
+        env:
+          devStorageName: ${{ needs.create-dev-environment.outputs.storageName }}
+          devFormRecognizerName: ${{ needs.create-dev-environment.outputs.formRecognizerName }}
+          qaFormRecognizerName: ${{ needs.create-qa-environment.outputs.formRecognizerName  }}
+          prodFormRecognizerName: ${{ needs.create-prod-environment.outputs.formRecognizerName  }}
+          devResourceGroupName: 'rg-form-recognizer-devops-dev'
+          qaResourceGroupName: 'rg-form-recognizer-devops-qa'
+          prodResourceGroupName: 'rg-form-recognizer-devops-prod'
+
+      - name: Deploy Azure Resources
+        id: armDeployment
+        uses: azure/arm-deploy@v1
+        with:
+          subscriptionId: ${{ secrets.subscriptionId }}
+          resourceGroupName: ${{ env.RG_NAME }}
+          template: ./bicep/utility.bicep
+          parameters: ./bicep/utility.parameters.json
+
+      - name: Setup DotNet 6.0.X Environment
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: 'Building with Dotnet'
+        shell: bash
+        run: |
+          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
+          dotnet build --configuration Release --output ./output
+          popd     
+
+      - name: 'Run Azure Functions Action'
+        uses: Azure/functions-action@v1        
+        with:
+          app-name: ${{ steps.armDeployment.outputs.functionName }}
+          package: '${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}/output'
+
+      - name: logout
+        run: |
+          az logout              
+
+  create-deploy-blazor:
+    needs: create-deploy-azure-function
+    runs-on: ubuntu-latest
+
+    env:
+      RG_NAME: 'rg-form-recognizer-devops-utility'         
+      AZURE_WEBAPP_PACKAGE_PATH: 'src/FormBlazorClient'    
+      DOTNET_VERSION: '6.0.x'              
+
+    steps:
+      
+      - uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: Azure/login@v1
+        with:
+          creds: ${{ secrets.azure_credentials }}
+
+      - name: Convert to ARM template
+        run: |
+          bicep build ./bicep/web.bicep
+
+      - name: Deploy Azure Resources
+        id: armDeployment
+        uses: azure/arm-deploy@v1
+        with:
+          subscriptionId: ${{ secrets.subscriptionId }}
+          resourceGroupName: ${{ env.RG_NAME }}
+          template: ./bicep/web.json
+          parameters: location=${{ env.LOCATION }} strName=${{ needs.create-deploy-azure-function.outputs.storageName }} appInsightName=${{ needs.create-deploy-azure-function.outputs.appInsightName }} functionHostname=${{ needs.create-deploy-azure-function.outputs.functionHostname }}
+
+      - name: Setup DotNet 6.0.X Environment
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: dotnet build and publish
+        run: |
+          pushd './${{ env.AZURE_WEBAPP_PACKAGE_PATH }}'
+          dotnet restore
+          dotnet build --configuration Release
+          dotnet publish -c Release -o output          
+
+      - name: 'Run Azure webapp deploy action using publish profile credentials'
+        uses: azure/webapps-deploy@v2
+        with: 
+          app-name: ${{ steps.armDeployment.outputs.webAppName }}
+          package: '${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/output' 
+
+      - name: logout
+        run: |
+          az logout            

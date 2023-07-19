@@ -1,0 +1,58 @@
+name: Migrate Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      modelId:
+        required: true
+        description: 'The modelId to copy from DEV to other environment'
+        type: string
+
+jobs:
+  validateDEV:
+    name: Validate Model Exists
+    environment:
+      name: DEV
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run Azure PowerShell script validate
+        run: |
+          $secureString = ConvertTo-SecureString ${{ secrets.FUNCTION_VALIDATE_ENDPOINT }} -asplaintext -force
+          ./scripts/validateModel.ps1 -modelId ${{ github.event.inputs.modelId }} -endpoint $secureString
+        shell: pwsh
+
+  deploymentQA:
+    name: Deployment in QA    
+    environment:
+      name: QA
+    needs: validateDEV
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run Azure PowerShell script validate
+        shell: pwsh 
+        run: |
+          $secureString = ConvertTo-SecureString ${{ secrets.FUNCTION_COPY_MODEL_ENDPOINT}} -asplaintext -force
+          ./scripts/copyModel.ps1 -modelId ${{ github.event.inputs.modelId }} -sourceEnvironment 0 -destinationEnvironment 1 -functionEndpoint $secureString
+
+  deploymentPROD:
+    name: Deployment in PROD
+    environment:
+      name: PROD
+    needs: deploymentQA
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run Azure PowerShell script validate
+        shell: pwsh 
+        run: |
+          $secureString = ConvertTo-SecureString ${{ secrets.FUNCTION_COPY_MODEL_ENDPOINT}} -asplaintext -force
+          ./scripts/copyModel.ps1 -modelId ${{ github.event.inputs.modelId }} -sourceEnvironment 1 -destinationEnvironment 2 -functionEndpoint $secureString
+               
